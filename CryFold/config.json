@@ -18,8 +18,8 @@
     },
   "HMM_search":
     {
-      "confidence_threshold": 50,
-      "Evalue": 1,
+      "confidence_threshold": 25,
+      "Evalue": 0.001,
       "cpus": 4
     }
 }

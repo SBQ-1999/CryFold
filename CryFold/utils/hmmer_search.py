@@ -102,7 +102,7 @@ def hmmer_search(input_dir:str,fasta_database:str,raw_fasta=None,output_dir=None
         if net_scores[ii] < threshold:
             continue
         dist,_ = prune_cas_tree.query(net_cas[ii], k=1)
-        if not np.all(dist>1):
+        if np.sum(dist>1)/len(dist) <0.5:
             continue
         chain_name = number_to_chain_str(ii)
         with pyhmmer.plan7.HMMFile(net_hmm_dir+f'{chain_name}.hmm') as hmm_file:
