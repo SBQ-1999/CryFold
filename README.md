@@ -3,7 +3,7 @@
 ## Overview
 CryFold is a software that automatically constructs full-atom 3D structural models of proteins based on cryo-EM density maps and sequence information.
 
-It has two main stages: the first step predicts the C<span>&alpha;</span> atom coordinates from the density map, and the second step builds the full-atom model by combining the sequence and density map information. Finally, the full-atom model will undergo a post-processing program to generate the final protein model. This post-processing program comes from [ModelAngelo](https://github.com/3dem/model-angelo).
+It has two main stages: the first step predicts the C<span>&alpha;</span> atom coordinates from the density map, and the second step builds the full-atom model by combining the sequence and density map information. Finally, the full-atom model will undergo a post-processing program to generate the final protein model. This post-processing program is modified from [ModelAngelo](https://github.com/3dem/model-angelo).
 
 <div align=center><img src="example/figure/framework.png" width="100%" height="100%"/></div>
 
@@ -97,6 +97,23 @@ Then, run CryFold:
 ```
 build -s rcsb_pdb_7XMV.fasta -v emd_33306.map -m emd_33306_msk_1.map -o use_mask
 ```
+</details> 
+
+<details>
+<summary>Use only cryo-EM density map without inputting sequences</summary>
+<br>
+
+If you have a protein sequence database for the species that can cover all sequences of the density map, you can run the command as follows (Otherwise, do not specify the -f parameter, and it will only return the HMM profiles predicted by Cry-Net):
+```
+build -v map.mrc -o output -f sequence_database.fasta
+```
+Another way to use the sequence database is under the premise of input sequences (which can be any subset of the sequences covered by the density map):
+```
+build -s protein.fasta -v map.mrc -o output -f sequence_database.fasta
+```
+Both of the above applications can return a new sequence file (output.fasta), which contains sequences found in the density map based on the sequence database.
+
+Under the premise of not knowing any sequences, the simplest application method is to obtain an initial sequence output.fasta by not inputting any sequences and only providing the sequence database. Then, use output.fasta as the input for CryFold and run it iteratively until no new sequences are searched.
 </details> 
 
 <details>

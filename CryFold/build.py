@@ -13,6 +13,7 @@ import numpy as np
 from CryFold.utils.fasta_utils import read_fasta
 from CryFold.Unet.inference import infer as UNet_infer
 from CryFold.CryNet.inference import infer as CryNet_infer
+from CryFold.CryNet.inference_no_seq import infer as CryNet_infer_no_seq
 from CryFold.utils.fasta_utils import is_valid_fasta_ending
 from CryFold.utils.misc_utils import filter_useless_warnings, Args
 from CryFold.utils.hmmer_search import hmmer_search
@@ -61,8 +62,7 @@ def add_args(parser):
         "-s",
         "--s",
         help="input sequence fasta file",
-        type=str,
-        required=True
+        type=str
     )
     main_args.add_argument(
         "--output-dir",
@@ -140,7 +140,10 @@ def main():
             config = json.load(f)
 
     UNet_model_logdir = pkg_dir + "/CryFold/checkpoint/SimpleUnet.pth"
-    CryNet_model_logdir = pkg_dir + "/CryFold/checkpoint/CryNet.pth"
+    if parsed_args.sequence_path:
+        CryNet_model_logdir = pkg_dir + "/CryFold/checkpoint/CryNet.pth"
+    else:
+        CryNet_model_logdir = pkg_dir + "/CryFold/checkpoint/CryNet_no_seq.pth"
 
     parsed_args.output_dir = os.path.normpath(parsed_args.output_dir)
     os.makedirs(parsed_args.output_dir, exist_ok=True)
@@ -149,11 +152,11 @@ def main():
 
     print("---------------------------- CryFold -----------------------------")
     print("By Baoquan Su, Yang lab.")
+    if parsed_args.sequence_path:
+        if not is_valid_fasta_ending(parsed_args.sequence_path):
+            raise RuntimeError(f"File {parsed_args.sequence_path} is not a fasta file format.")
 
-    if not is_valid_fasta_ending(parsed_args.sequence_path):
-        raise RuntimeError(f"File {parsed_args.sequence_path} is not a fasta file format.")
-
-    _ = read_fasta(parsed_args.sequence_path)
+        _ = read_fasta(parsed_args.sequence_path)
 
 
 
@@ -195,29 +198,50 @@ def main():
             CryNet_args.end_flag = True
         else:
             CryNet_args.end_flag = False
-        CryNet_output = CryNet_infer(CryNet_args)
+        if parsed_args.sequence_path:
+            CryNet_output = CryNet_infer(CryNet_args)
+            current_ca_cif_path = os.path.join(
+                current_output_dir, "model_fix.cif"
+            )
+        else:
+            CryNet_output = CryNet_infer_no_seq(CryNet_args)
+            current_ca_cif_path = os.path.join(
+                current_output_dir, "model_net.cif"
+            )
+    if parsed_args.sequence_path:
+        pruned_file_src = CryNet_output.replace("model_net.cif", "model_prune.cif")
+        raw_file_src = CryNet_output.replace("model_net.cif", "model_fix.cif")
 
-        current_ca_cif_path = os.path.join(
-            current_output_dir, "model_fix.cif"
-        )
+        name = os.path.basename(parsed_args.output_dir)
+        pruned_file_dst = os.path.join(parsed_args.output_dir, f"{name}.cif")
+        raw_file_dst = os.path.join(parsed_args.output_dir, f"{name}_raw.cif")
 
-    pruned_file_src = CryNet_output.replace("model_net.cif", "model_prune.cif")
-    raw_file_src = CryNet_output.replace("model_net.cif", "model_fix.cif")
-
-    name = os.path.basename(parsed_args.output_dir)
-    pruned_file_dst = os.path.join(parsed_args.output_dir, f"{name}.cif")
-    raw_file_dst = os.path.join(parsed_args.output_dir, f"{name}_raw.cif")
-
-    os.replace(pruned_file_src, pruned_file_dst)
-    os.replace(raw_file_src, raw_file_dst)
-    filter_chains(pruned_file_dst,pruned_file_dst,bfactor_threshold=CryNet_args.filter_threshold)
-    if CryNet_args.raw_filter:
-        filter_chains(raw_file_dst, raw_file_dst, bfactor_threshold=CryNet_args.filter_threshold)
+        os.replace(pruned_file_src, pruned_file_dst)
+        os.replace(raw_file_src, raw_file_dst)
+        filter_chains(pruned_file_dst,pruned_file_dst,bfactor_threshold=CryNet_args.filter_threshold)
+        if CryNet_args.raw_filter:
+            filter_chains(raw_file_dst, raw_file_dst, bfactor_threshold=CryNet_args.filter_threshold)
     if parsed_args.fasta_path:
         print(f"---------------------------- hmmer_search ----------------------------")
-        new_hits_excel,new_hits_seq = hmmer_search(input_dir = parsed_args.output_dir,fasta_database=parsed_args.fasta_path,raw_fasta=parsed_args.sequence_path,threshold=config["HMM_search"]["confidence_threshold"],cpus=config["HMM_search"]["cpus"],Evalue=config["HMM_search"]["Evalue"],total_round=total_CryNet_rounds)
+        new_hits_evalue = config["HMM_search"]["Evalue"]
+        new_hits_excel,new_hits_seq = hmmer_search(input_dir = parsed_args.output_dir,fasta_database=parsed_args.fasta_path,raw_fasta=parsed_args.sequence_path,threshold=config["HMM_search"]["confidence_threshold"],cpus=config["HMM_search"]["cpus"],Evalue=new_hits_evalue if parsed_args.sequence_path else min(new_hits_evalue*100,10),total_round=total_CryNet_rounds)
         print(f'The new sequence results found cryo-EM density map, in addition to the input sequence, have been saved to {new_hits_excel}.')
         print(f"The additional sequences have been integrated into {new_hits_seq}, and it is recommended to rerun CryFold using this new sequence.")
+    if parsed_args.sequence_path:
+        pass
+    else:
+        raw_file_src = CryNet_output
+        hmm_profiles_src = os.path.join(os.path.dirname(CryNet_output), "net_hmm_profiles")
+
+        name = os.path.basename(parsed_args.output_dir)
+        raw_file_dst = os.path.join(parsed_args.output_dir, f"{name}_raw.cif")
+        pruned_file_dst = os.path.join(parsed_args.output_dir, f"{name}.cif")
+        hmm_profiles_dst = os.path.join(parsed_args.output_dir, "hmm_profiles")
+
+        os.replace(raw_file_src, raw_file_dst)
+        filter_chains(raw_file_dst,pruned_file_dst,bfactor_threshold=config["HMM_search"]["confidence_threshold"])
+        shutil.rmtree(hmm_profiles_dst, ignore_errors=True)
+        os.replace(hmm_profiles_src, hmm_profiles_dst)
 
     if not parsed_args.keep_intermediate_results:
         shutil.rmtree(UNet_args.output_path, ignore_errors=True)
@@ -228,13 +252,17 @@ def main():
                 )
             )
     start_time = time.time()-start_time
-    with open(os.path.join(parsed_args.output_dir,'running_time.log'),'w') as f11:
-        f11.write(str(int(start_time))+'s')
+    # with open(os.path.join(parsed_args.output_dir,'running_time.log'),'w') as f11:
+    #     f11.write(str(int(start_time))+'s')
 
     print("-" * 70)
     print("CryFold has completed the construction of the full-atom protein model.")
     print("-" * 70)
-    print(f"You can find the final model filtered by the fasta sequence at: {pruned_file_dst}.\n")
+    if parsed_args.sequence_path:
+        print(f"You can find the final model filtered by the fasta sequence at: {pruned_file_dst}.\n")
+    else:
+        print(f'You can find the final model without sequence correction at: {pruned_file_dst}.\n')
+        print(f'The model contains many uncertain regions. It is recommended to use hmm_search to search for sequences and use it as input to iteratively run CryFold.\n')
     print("The confidence scores of the model predictions are saved in the bfactor field of the mmcif file.")
     print("-" * 70)
     print(f"If you want to see more of the built regions in the map, you can go to: {raw_file_dst}")

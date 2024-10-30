@@ -16,30 +16,26 @@ import tqdm
 from CryFold.utils.mrc_tools import load_map,make_model_grid
 from CryFold.utils.flood_fill import final_results_to_cif, normalize_local_confidence_score
 from CryFold.utils.fasta_utils import is_valid_fasta_ending
-from CryFold.utils.protein import Protein, load_sequence_from_fasta, get_protein_empty_except, load_protein_from_prot, \
-    get_lm_embeddings_for_protein, get_protein_from_file_path
+from CryFold.utils.protein import Protein, get_protein_empty_except, load_protein_from_prot, get_protein_from_file_path
 from CryFold.utils.affine_utils import init_random_affine_from_translation, get_affine_translation, get_affine, get_affine_rot
 from CryFold.utils.pdb_untils import load_cas_from_structure
 import numpy as np
-from CryFold.CryNet.CryFolder import CryFolder
+from CryFold.CryNet.CryFolder_no_seq import CryFolder
 
 def get_module_device(module: torch.nn.Module) -> torch.device:
     return next(module.parameters()).device
 
-def init_protein_from_see_alpha(see_alpha_file: str, fasta_file: str,end_flag:bool=False) -> Protein:
+def init_protein_from_see_alpha(see_alpha_file: str) -> Protein:
     ca_locations = torch.from_numpy(load_cas_from_structure(see_alpha_file)).float()
     rigidgroups_gt_frames = np.zeros((len(ca_locations), 1, 3, 4), dtype=np.float32)
     rigidgroups_gt_frames[:, 0] = init_random_affine_from_translation(
         ca_locations
     ).numpy()
     rigidgroups_gt_exists = np.ones((len(ca_locations), 1), dtype=np.float32)
-    unified_seq, unified_seq_len = load_sequence_from_fasta(fasta_file)
 
     return get_protein_empty_except(
         rigidgroups_gt_frames=rigidgroups_gt_frames,
-        rigidgroups_gt_exists=rigidgroups_gt_exists,
-        unified_seq=unified_seq,
-        unified_seq_len=unified_seq_len,
+        rigidgroups_gt_exists=rigidgroups_gt_exists
     )
 def argmin_random(count_tensor: torch.Tensor):
     rand_idxs = torch.randperm(len(count_tensor))
@@ -67,7 +63,6 @@ def get_inference_data(protein, grid_data, idx, crop_length=200):
     return {
         "affines": torch.from_numpy(backbone_frames[picked_indices]),
         "cryo_grids": torch.from_numpy(grid[None]),  # Add channel dim
-        "sequence": torch.from_numpy(np.copy(protein.residue_to_lm_embedding)),
         "cryo_global_origins": torch.from_numpy(
             grid_data.global_origin.astype(np.float32)
         ),
@@ -80,14 +75,11 @@ def run_inference_on_data(
     module,
     data,
     run_iters: int = 3,
-    seq_attention_batch_size: int = 200,
 ):
     device = get_module_device(module)
 
     affines = data["affines"].to(device)
     result = module(
-        sequence=data["sequence"][None].to(device),
-        sequence_mask=torch.ones(1, data["sequence"].shape[0], device=device),
         positions=get_affine_translation(affines),
         batch=None,
         cryo_grids=[data["cryo_grids"].to(device)],
@@ -95,7 +87,6 @@ def run_inference_on_data(
         cryo_voxel_sizes=[data["cryo_voxel_sizes"].to(device)],
         init_affine=affines,
         run_iters=run_iters,
-        seq_attention_batch_size=seq_attention_batch_size,
     )
     result.to("cpu")
     return result
@@ -204,16 +195,13 @@ def infer(args):
     output_dir = os.path.dirname(args.output_dir)
     device = torch.device(args.device)
     state_dict = torch.load(args.model_dir,map_location=torch.device('cpu'))
-    module = CryFolder(1280,256,num_layers_former=18,num_layers_ipa=7,attention_heads=8)
+    module = CryFolder(256,num_layers_former=21,num_layers_ipa=7,attention_heads=8)
     module.load_state_dict(state_dict)
     module.to(device)
     module.eval()
     protein = None
     if args.struct.endswith("cif") or args.struct.endswith("pdb"):
-        if not is_valid_fasta_ending(args.fasta):
-            raise RuntimeError(f"File {args.fasta} is not a fasta file format.")
-        protein = init_protein_from_see_alpha(args.struct, args.fasta,end_flag=args.end_flag)
-        protein = get_lm_embeddings_for_protein(protein,device=device)
+        protein = init_protein_from_see_alpha(args.struct)
     if protein is None:
         raise RuntimeError(f"File {args.struct} is not a supported file format.")
     grid_data = None
@@ -247,7 +235,7 @@ def infer(args):
         data = get_inference_data(protein, grid_data, idx, crop_length=args.crop_length)
 
         results = run_inference_on_data(
-            module, data, seq_attention_batch_size=args.seq_attention_batch_size
+            module, data
         )
         collated_results, protein = collate_nn_results(
             collated_results,
@@ -279,7 +267,7 @@ def infer(args):
     final_results_to_cif(
         final_results,
         output_path,
-        protein.unified_seq.split("|||"),
+        sequences=None,
         verbose=True,
         aggressive_pruning=args.aggressive_pruning,
         mask_threshold=args.mask_threshold,
@@ -294,9 +282,6 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--map-path", "--m", required=True, help="The path to the input map")
-    parser.add_argument(
-        "--fasta", "--f", required=True, help="The path to the sequence file"
-    )
     parser.add_argument(
         "--struct", "--s", required=True, help="The path to the structure file"
     )
@@ -317,12 +302,6 @@ if __name__ == "__main__":
         action="store_true",
         help="Only build parts of the model that have a good match with the sequence. "
         + "Will lower recall, but quality of build is higher",
-    )
-    parser.add_argument(
-        "--seq-attention-batch-size",
-        type=int,
-        default=300,
-        help="Lower memory usage by processing the sequence in batches.",
     )
     args = parser.parse_args()
     infer(args)

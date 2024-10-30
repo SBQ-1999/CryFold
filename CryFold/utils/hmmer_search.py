@@ -94,16 +94,17 @@ def hmmer_search(input_dir:str,fasta_database:str,raw_fasta=None,output_dir=None
     model_prune_path = base_dir + f'/{os.path.basename(base_dir)}.cif'
     model_net_path = base_dir + f'/CryNet_round_{total_round}/model_net.cif'
     net_hmm_dir = base_dir + f'/CryNet_round_{total_round}/net_hmm_profiles/'
-
-    prune_cas = load_cas_from_structure(model_prune_path)
-    prune_cas_tree = cKDTree(prune_cas)
+    if raw_fasta:
+        prune_cas = load_cas_from_structure(model_prune_path)
+        prune_cas_tree = cKDTree(prune_cas)
     net_cas,net_scores = load_ca_score_from_structure(model_net_path)
     for ii in range(len(net_cas)):
         if net_scores[ii] < threshold:
             continue
-        dist,_ = prune_cas_tree.query(net_cas[ii], k=1)
-        if np.sum(dist>1)/len(dist) <0.5:
-            continue
+        if raw_fasta:
+            dist,_ = prune_cas_tree.query(net_cas[ii], k=1)
+            if np.sum(dist>1)/len(dist) <0.5:
+                continue
         chain_name = number_to_chain_str(ii)
         with pyhmmer.plan7.HMMFile(net_hmm_dir+f'{chain_name}.hmm') as hmm_file:
             for hits in pyhmmer.hmmsearch(hmm_file, sequences, cpus=cpus):
@@ -132,15 +133,15 @@ def hmmer_search(input_dir:str,fasta_database:str,raw_fasta=None,output_dir=None
         find_new_seq_name = list(filtered_df['target_name'])
         filtered_df.sort_values(by=["E-value"], inplace=True)
         filtered_df.to_excel(writer,sheet_name='best_hits',index=False)
-    if raw_fasta is not None:
-        alphabet = pyhmmer.easel.Alphabet.amino()
-        new_seq_list = {seq.name.decode('utf-8'): seq for seq in sequences}
+    alphabet = pyhmmer.easel.Alphabet.amino()
+    out_seq_list = []
+    new_seq_list = {seq.name.decode('utf-8'): seq for seq in sequences}
+    if raw_fasta:
         raw_seq_list = SeqIO.parse(raw_fasta, "fasta")
-        out_seq_list = []
         for sss in raw_seq_list:
             out_seq_list.append(sss)
-        new_seq_list = [new_seq_list[cn] for cn in find_new_seq_name]
-        for sss2 in new_seq_list:
-            out_seq_list.append(SeqRecord(Seq(alphabet.decode(sss2.sequence)),id=sss2.name.decode("utf-8"),description=sss2.description.decode("utf-8")))
-        SeqIO.write(out_seq_list, os.path.join(output_dir,f'{os.path.basename(base_dir)}.fasta'), "fasta")
+    new_seq_list = [new_seq_list[cn] for cn in find_new_seq_name]
+    for sss2 in new_seq_list:
+        out_seq_list.append(SeqRecord(Seq(alphabet.decode(sss2.sequence)),id=sss2.name.decode("utf-8"),description=sss2.description.decode("utf-8")))
+    SeqIO.write(out_seq_list, os.path.join(output_dir,f'{os.path.basename(base_dir)}.fasta'), "fasta")
     return os.path.join(output_dir, "new_hits.xlsx"),os.path.join(output_dir,f'{os.path.basename(base_dir)}.fasta')

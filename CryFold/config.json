@@ -1,7 +1,7 @@
 {
   "UNet_Args":
     {
-      "batch_size": 6,
+      "batch_size": 5,
       "stride": 50,
       "windows_size": 65,
       "threshold": 0.6
@@ -19,7 +19,7 @@
   "HMM_search":
     {
       "confidence_threshold": 25,
-      "Evalue": 0.001,
+      "Evalue": 0.01,
       "cpus": 4
     }
 }

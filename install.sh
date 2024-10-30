@@ -3,11 +3,11 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 cd "$SCRIPT_DIR" || exit 1
 if [ ! -f "./CryFold/checkpoint/CryNet.pth" ] || [ ! -f "./CryFold/checkpoint/SimpleUnet.pth" ]; then
   echo "Downloading the required weight files for CryFold:"
-  wget https://yanglab.qd.sdu.edu.cn/CryFold/download/checkpoint.zip --no-check-certificate
-  unzip checkpoint.zip
-  rm -f checkpoint.zip
+  wget https://yanglab.qd.sdu.edu.cn/CryFold/download/checkpoints1.zip --no-check-certificate
+  unzip checkpoints1.zip
+  rm -f checkpoints1.zip
   if [ ! -f "./CryFold/checkpoint/CryNet.pth" ] || [ ! -f "./CryFold/checkpoint/SimpleUnet.pth" ]; then
-      echo "Please manually download the weight file from https://yanglab.qd.sdu.edu.cn/CryFold/download/checkpoint.zip, and download it to the checkpoint folder within the CryFold directory."
+      echo "Please manually download the weight file from https://yanglab.qd.sdu.edu.cn/CryFold/download/checkpoints1.zip, and download it to the checkpoint folder within the CryFold directory."
       exit 1
   fi
 fi

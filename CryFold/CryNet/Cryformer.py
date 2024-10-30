@@ -223,3 +223,33 @@ class Cryformer(nn.Module):
         # y_2 = self.traingle_attention(y_2)
         y_2 = self.transition2(y_2)
         return y_1,y_2,attention_scores
+class Cryformer_no_seq(nn.Module):
+    def __init__(
+            self,
+            in_features:int,
+            attention_heads: int,
+            attention_features: int = 48,
+            num_neighbours : int = 20,
+            activation_class:nn.Module = nn.ReLU
+    ):
+        super().__init__()
+        self.nodeattention = NodeAttention(in_features,num_neighbours,attention_heads,attention_features)
+        self.transition1 = Transition(in_features,nn.LayerNorm)
+        self.outer = OutProductMean(in_features)
+        self.norm = nn.LayerNorm(in_features)
+        self.edge_deliver = EdgeAttention(in_features,num_neighbours,attention_heads,attention_features)
+        self.transition2 = Transition(in_features,nn.LayerNorm)
+    def forward(
+            self,
+            x_1,
+            x_2,
+            pos_emb,
+            edge_index,
+            **kwargs,
+    ):
+        y_1 = self.nodeattention(x_1,x_2,pos_emb,edge_index)
+        y_1 = self.transition1(y_1)
+        y_2 = self.norm(math.sqrt(2)*x_2 + self.outer(y_1,edge_index))
+        y_2 = self.edge_deliver(y_2,edge_index)
+        y_2 = self.transition2(y_2)
+        return y_1,y_2

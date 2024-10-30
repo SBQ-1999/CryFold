@@ -445,6 +445,7 @@ def prune_and_connect_chains(
     ca_pos: np.ndarray,
     aggressive_pruning=False,
     chain_prune_length=4,
+    match_original_seq_len=None
 ):
     chains = best_match_output.prune_chains(
         chains,
@@ -459,6 +460,12 @@ def prune_and_connect_chains(
             ca_pos,
         )
     chains, best_match_output = sort_chains_by_match(chains, best_match_output)
+    if aggressive_pruning:
+        match_original_seq_len_new = [match_original_seq_len[seq_idx] if seq_idx<len(match_original_seq_len) else 1000 for seq_idx in best_match_output.sequence_idxs]
+        chains = best_match_output.prune_short_chains(
+            chains,
+            match_original_seq_len=match_original_seq_len_new
+        )
     return FixChainsOutput(
         chains=chains,
         best_match_output=best_match_output,

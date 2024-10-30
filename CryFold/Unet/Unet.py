@@ -1,4 +1,5 @@
 import torch
+import einops
 from torch import nn
 import random
 import numpy as np
@@ -127,6 +128,64 @@ class Res2NetBlock(nn.Module):
         y = self.conv2(self.activate_class(self.norm1(torch.cat(y_list,dim=1))))
         y = self.activate_class(y+self.shortcut_conv(x))
         return y
+class AttentionGate(nn.Module):
+    def __init__(self,down_features:int,up_features:int,out_features:int,attention_features:int=64,attention_heads:int=8):
+        super(AttentionGate, self).__init__()
+        self.dfz = down_features
+        self.ufz = up_features
+        self.ofz = out_features
+        self.afz = attention_features
+        self.ahz = attention_heads
+        self.conv_q = nn.Sequential(nn.Conv3d(
+            in_channels=self.ufz,
+            out_channels=self.afz,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            bias=False
+        ),nn.InstanceNorm3d(self.afz,affine=True))
+        self.conv_k = nn.Sequential(nn.Conv3d(
+            in_channels=self.dfz,
+            out_channels=self.afz,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            bias=False
+        ),nn.InstanceNorm3d(self.afz,affine=True))
+        self.conv_v = nn.Sequential(nn.Conv3d(
+            in_channels=self.dfz,
+            out_channels=self.ufz,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            bias=False
+        ),nn.InstanceNorm3d(self.ufz,affine=True))
+        self.gate = nn.Sequential(
+            nn.ReLU(),
+            nn.Conv3d(
+                in_channels=self.afz,
+                out_channels=self.ahz,
+                kernel_size=1,
+                stride=1,
+                padding=0,
+                bias=True
+            ),
+            nn.Sigmoid()
+        )
+        self.relu = nn.ReLU()
+        self.conv_back = ConvBuildingBlock(self.ufz,self.ofz)
+    def forward(self,us,ds):
+        ds_shape = ds.shape
+        D, H, W = ds_shape[2:]
+        upsampled = nn.functional.interpolate(input=us, size=(D, H, W), mode='trilinear', align_corners=True)
+        query = self.conv_q(upsampled)
+        key = self.conv_k(ds)
+        value = self.conv_v(ds)
+        value = einops.rearrange(value,"N (afz ahz) d h w -> N afz ahz d h w", ahz=self.ahz)
+        gate = self.gate(query+key) #N ahz d h w
+        out = value*gate[:,None]
+        out = einops.rearrange(out,"N afz ahz d h w -> N (afz ahz) d h w", ahz=self.ahz)
+        return self.conv_back(self.relu(out+upsampled))
 
 class SimpleUnet(nn.Module):
     def __init__(self):
@@ -137,14 +196,15 @@ class SimpleUnet(nn.Module):
         self.downsample3 = Bottleneck(256, 256 // 4, stride=2, affine=True)
         self.downsample4 = Bottleneck(256, 256 // 4, stride=2, affine=True)
         self.main0 = self.main_layer(256, 2, 4)
-        self.conv43 = ConvBuildingBlock(256+256,256)
+        self.attn1 = AttentionGate(256,256,256)
         self.main1 = self.main_layer(256, 3, 4)
-        self.conv32 = ConvBuildingBlock(256+256, 128)
+        self.attn2 = AttentionGate(256,256,128)
         self.main2 = self.main_layer(128, 4, 4)
-        self.conv21 = ConvBuildingBlock(256+128, 64)
+        self.attn3 = AttentionGate(256,128,64)
         self.main3 = self.main_layer(64, 4, 4)
-        self.conv10 = ConvBuildingBlock(256+64, 64)
+        self.attn4 = AttentionGate(256,64,64)
         self.main4 = self.main_layer(64, 4, 4)
+        self.conv_addition = nn.Conv3d(64, 1, kernel_size=3, stride=1, padding=1)
         self.conv14 = nn.Conv3d(64, 32, kernel_size=3, stride=1, padding=1)
         self.conv11 = nn.Conv3d(64, 32, kernel_size=5, stride=1, padding=2)
         self.conv12 = nn.Conv3d(64, 32, kernel_size=7, stride=1, padding=3)
@@ -155,7 +215,6 @@ class SimpleUnet(nn.Module):
         for i in range(num_layers):
             layer.append(Res2NetBlock(input_channels,input_channels,scale=expansion))
         return nn.Sequential(*layer)
-    #上采样
     #multi_scale_conv
     def forward(self,V):
         ds_0 = self.shortconv0(V)
@@ -164,15 +223,10 @@ class SimpleUnet(nn.Module):
         ds_3 = self.downsample3(ds_2)
         ds_4 = self.downsample4(ds_3)
         c4 = self.main0(ds_4)
-        def upsample_add(f, g):
-            g_shape = g.shape
-            D, H, W = g_shape[2:]
-            upsampled = nn.functional.interpolate(input=f, size=(D, H, W), mode='trilinear', align_corners=True)
-            return torch.cat([upsampled,g],dim=1)
-        c3 = self.main1(self.conv43(upsample_add(c4, ds_3)))
-        c2 = self.main2(self.conv32(upsample_add(c3,ds_2)))
-        c1 = self.main3(self.conv21(upsample_add(2*c2,ds_1)))
-        c0 = self.main4(self.conv10(upsample_add(4*c1,ds_0)))
+        c3 = self.main1(self.attn1(c4, ds_3))
+        c2 = self.main2(self.attn2(c3,ds_2))
+        c1 = self.main3(self.attn3(c2,ds_1))
+        c0 = self.main4(self.attn4(c1,ds_0))
         f3 = self.conv14(c0)
         f5 = self.conv11(c0)
         f7 = self.conv12(c0)
@@ -180,48 +234,3 @@ class SimpleUnet(nn.Module):
         f=self.relu1(f)
         f=self.conv13(f)
         return f
-class focal_loss(nn.Module):
-    def __init__(self,factor=1,gama=1.5,eps=1e-8):
-        super(focal_loss,self).__init__()
-        self.eps = eps
-        self.sig1 = nn.Sigmoid()
-        self.gama = gama
-        self.factor = factor
-    def forward(self,x,y):
-        p = self.sig1(x)
-        N = y.numel()
-        M = torch.sum(y)
-        indic1 = torch.nonzero(y)
-        indic2 = torch.nonzero(1-y)
-        positive = p[indic1[:,0],indic1[:,1],indic1[:,2],indic1[:,3],indic1[:,4]]
-        negative = (1-p)[indic2[:,0],indic2[:,1],indic2[:,2],indic2[:,3],indic2[:,4]]
-        positive_loss = torch.sum(-((1-positive)**self.gama)*((N-M)/M)*torch.log(positive+self.eps))
-        negative_loss = torch.sum(-((1-negative)**self.gama)*torch.log(negative+self.eps))
-        loss = self.factor*positive_loss + (2-self.factor)*negative_loss
-        loss_mean = loss/N
-        return loss_mean
-
-class RandomCrop(object):
-    def __init__(self,output_size:int,ispadding:bool=True):
-        assert isinstance(output_size,int)
-        self.output_size = (output_size,output_size,output_size)
-        self.ispadding = ispadding
-    def __call__(self,*x):
-        y=[]
-        d,h,w=x[0].shape
-        od,oh,ow=self.output_size
-        if self.ispadding:
-            x=list(x)
-            k1=max(od-d,0);pad1 = k1//2;pads1 = (pad1,pad1) if k1 % 2 == 0 else (pad1,pad1+1);
-            k2 = max(oh-h, 0);pad2 = k2 // 2;pads2 = (pad2, pad2) if k2 % 2 == 0 else (pad2, pad2 + 1);
-            k3 = max(ow-w, 0);pad3 = k3 // 2;pads3 = (pad3, pad3) if k3 % 2 == 0 else (pad3, pad3 + 1);
-            for i in range(len(x)):
-                x[i] = np.pad(x[i],(pads1,pads2,pads3),mode='constant')
-        d, h, w = x[0].shape
-        sd = random.randint(0,d-od)
-        sh = random.randint(0,h-oh)
-        sw = random.randint(0,w-ow)
-        for ix in x:
-            y.append(ix[sd:sd+od,sh:sh+oh,sw:sw+ow])
-        y = tuple(y)
-        return y

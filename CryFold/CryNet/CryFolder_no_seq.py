@@ -5,7 +5,7 @@ import torch
 from torch import nn
 from einops.layers.torch import Rearrange
 from CryFold.CryNet.features_init import CryoFeatures
-from CryFold.CryNet.Cryformer import Cryformer
+from CryFold.CryNet.Cryformer import Cryformer_no_seq
 from CryFold.CryNet.structure_module import InvariantPointAttention,Transition,LinearWithShortcut,LinearWithSeq,LinearWithEdge
 from CryFold.CryNet.backbone_frame import BackboneFrameNet
 from CryFold.CryNet.Cryout import GNNOutput
@@ -14,7 +14,6 @@ from CryFold.utils.affine_utils import get_affine_translation,affine_from_3_poin
 class CryFolder(nn.Module):
     def __init__(
             self,
-            in_features:int,
             hidden_features:int,
             attention_features: int = 48,
             attention_heads:int = 8,
@@ -26,7 +25,6 @@ class CryFolder(nn.Module):
 
     ):
         super().__init__()
-        self.ifz = in_features
         self.hfz = hidden_features
         self.afz = attention_features
         self.ahz = attention_heads
@@ -37,11 +35,10 @@ class CryFolder(nn.Module):
         self.cryofeature = CryoFeatures(in_features=hidden_features,attention_features=self.afz)
         self.formers = nn.ModuleList(
             [
-                Cryformer(
+                Cryformer_no_seq(
                     in_features=hidden_features,
                     attention_features=self.afz,
                     attention_heads=attention_heads,
-                    sequence_features=in_features,
                     num_neighbours=num_neighbours,
                     activation_class=activation_function
                 ) for _ in range(num_layers_former)
@@ -75,30 +72,20 @@ class CryFolder(nn.Module):
         self.torsion_angle_fc = LinearWithShortcut(in_features = self.hfz,hidden_features = self.hfz//2,out_features = 83*2)
     def forward(
             self,
-            sequence = None,
-            sequence_mask = None,
             positions = None,
             init_affine = None,
             run_iters:int=1,
-            seq_attention_batch_size:int = 180,
             **kwargs,
     ) -> GNNOutput:
-        assert sequence is not None and sequence_mask is not None and positions is not None
+        assert positions is not None
         result = GNNOutput(positions=positions,init_affine=init_affine,hidden_features=self.hfz)
-        factor_attention = (np.arange(1,self.num_layers_former*2,2))/self.num_layers_former**2
         for run_iter in range(run_iters):
             notlast_flag = (run_iter!=(run_iters-1))
-            result["seq_attention_scores"] = 0
             with torch.no_grad() if notlast_flag else contextlib.nullcontext():
                 result['x'],x2,edge_index,cryo_edges,cryo_aa_logits,neighbour_emb,pos3d_emb = self.cryofeature(affines = result["pred_affines"][-1],**kwargs)
                 for idx in range(self.num_layers_former):
-                    (result['x'],x2,attention_scores) = self.formers[idx](x_1=result['x'],x_2=x2,pos_emb=pos3d_emb,edge_index=edge_index,
-                                                packed_sequence_emb=sequence,
-                                                packed_sequence_mask = sequence_mask,
-                                                attention_batch_size=seq_attention_batch_size,
-                                                **kwargs
-                                                )
-                    result["seq_attention_scores"] = result["seq_attention_scores"] + factor_attention[idx] * attention_scores
+                    result['x'], x2 = self.formers[idx](x_1=result['x'], x_2=x2, pos_emb=pos3d_emb,
+                                                        edge_index=edge_index)
                 cryo_edge_logits = self.cryo_edge(neighbour_emb,x2)
                 cryo_aa_logits = self.cryo_aa(cryo_aa_logits,result['x'])
                 node_residual = result['x']

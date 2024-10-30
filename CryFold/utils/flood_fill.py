@@ -27,7 +27,7 @@ from CryFold.utils.protein import (
     frames_and_literature_positions_to_atom14_pos,
     torsion_angles_to_frames,
 )
-from CryFold.utils.residue_constants import restype_atom14_mask
+from CryFold.utils.residue_constants import restype_atom14_mask,select_torsion_angles
 from CryFold.utils.affine_utils import get_affine_translation
 FloodFillChain = namedtuple("FloodFillChain", ["start_N", "end_C", "residues"])
 def normalize_local_confidence_score(
@@ -42,12 +42,15 @@ def normalize_local_confidence_score(
     return normalized_score
 
 def remove_overlapping_ca(
-    ca_positions: np.ndarray, radius_threshold: float = 0.5,
+    ca_positions: np.ndarray,bfactors,existence_mask=None,radius_threshold: float = 0.3,
 ) -> np.ndarray:
     kdtree = cKDTree(ca_positions)
-    existence_mask = np.ones(len(ca_positions), dtype=bool)
+    bfactors_copy = np.copy(bfactors)
+    sorted_indices = np.argsort(bfactors_copy)[::-1]
+    if existence_mask is None:
+        existence_mask = np.ones(len(ca_positions), dtype=bool)
 
-    for i in range(len(ca_positions)):
+    for i in sorted_indices:
         if existence_mask[i]:
             too_close = np.array(
                 kdtree.query_ball_point(ca_positions[i], r=radius_threshold,)
@@ -77,7 +80,13 @@ def chains_to_atoms(
     # Everything below is in the order of chains
     for chain_id in range(len(chains)):
         chain_id_backbone_affine = backbone_affine[chains[chain_id]]
-        torsion_angles = torch.from_numpy(final_results["pred_torsions"][existence_mask])[chains[chain_id]]
+        torsion_angles = select_torsion_angles(
+            torch.from_numpy(final_results["pred_torsions"][existence_mask])[
+                chains[chain_id]
+            ],
+            aatype=fixed_aatype_from_sequence[chain_id],
+        )
+
         all_frames = torsion_angles_to_frames(
             fixed_aatype_from_sequence[chain_id],
             chain_id_backbone_affine,
@@ -120,17 +129,22 @@ def final_results_to_cif(
     """
     Currently assumes the ordering it comes with, I will change this later
     """
-
+    bfactors = normalize_local_confidence_score(final_results["local_confidence"]) * 100
+    backbone_affine = torch.from_numpy(final_results["pred_affines"])
     existence_mask = (
         torch.from_numpy(final_results["existence_mask"]).sigmoid() > mask_threshold
     ).numpy()
+    existence_mask = remove_overlapping_ca(ca_positions=get_affine_translation(backbone_affine),bfactors=bfactors,existence_mask=existence_mask,radius_threshold=0.65 if end_flag else 0.3)
     if aatype is None:
         aatype = np.argmax(final_results["aa_logits"], axis=-1)[existence_mask]
-    backbone_affine = torch.from_numpy(final_results["pred_affines"])[existence_mask]
-    torsion_angles = torch.from_numpy(final_results["pred_torsions"][existence_mask])
-    # existence_mask2 = torch.from_numpy(final_results["existence_mask"]).sigmoid() > 0.2
-    # existence_mask2 = torch.arange(0,len(existence_mask2),dtype=torch.long)[existence_mask2]
-    # edge_logits = final_results["edge_logits"][existence_mask2[:,None].expand(-1,len(existence_mask2)).numpy(),existence_mask2[None].expand(len(existence_mask2),-1).numpy()]
+    backbone_affine = backbone_affine[existence_mask]
+    mask2unmask = np.arange(len(existence_mask))[existence_mask]
+
+    torsion_angles = select_torsion_angles(
+        torch.from_numpy(final_results["pred_torsions"][existence_mask]), aatype=aatype
+    )
+    edge_logits = final_results["edge_logits"][existence_mask]
+    edge_index = final_results['edge_index'][existence_mask]
     all_frames = torsion_angles_to_frames(aatype, backbone_affine, torsion_angles)
     all_atoms = frames_and_literature_positions_to_atom14_pos(aatype, all_frames)
     atom_mask = restype_atom14_mask[aatype]
@@ -143,7 +157,7 @@ def final_results_to_cif(
 
     all_atoms_np = all_atoms.numpy()
     # chains = ortools_build_path(all_atoms_np[:,[0,2]],edge_logits)
-    chains = flood_fill(all_atoms_np, bfactors)
+    chains = flood_fill(all_atoms_np, bfactors,edge_logits,edge_index,mask2unmask)
     # if end_flag:
     #     chains = ortools_build_path(all_atoms_np[:,[0,2]],edge_logits)
     # else:
@@ -151,7 +165,10 @@ def final_results_to_cif(
     chains_concat = np.concatenate(chains)
 
     # Prune chains based on length
-    pruned_chains = [c for c in chains if len(c) > 2]
+    if sequences is not None or end_flag:
+        pruned_chains = [c for c in chains if len(c) > 2]
+    else:
+        pruned_chains = chains
     chain_atom14_to_cif(
         [aatype[c] for c in pruned_chains],
         [all_atoms[c] for c in pruned_chains],
@@ -215,6 +232,7 @@ def final_results_to_cif(
             chain_prune_length=4,
             hmm_output_match_sequences=fix_chains_output.best_match_output.hmm_output_match_sequences,
         )
+        match_original_seq_len = np.array([len(seq) for seq in sequences])
 
         fix_chains_output = prune_and_connect_chains(
             fix_chains_output.chains,
@@ -222,6 +240,7 @@ def final_results_to_cif(
             ca_pos,
             aggressive_pruning=aggressive_pruning,
             chain_prune_length=4,
+            match_original_seq_len=match_original_seq_len
         )
 
         chain_all_atoms, chain_atom_mask, chain_bfactors, chain_aa_probs = chains_to_atoms(
@@ -257,8 +276,19 @@ def final_results_to_cif(
             )
 
     return new_final_results
-
-def flood_fill(atom14_positions, b_factors, n_c_distance_threshold=2.1):
+def BayesCoreect(possible_indices,idx,dists,edge_logits,edge_index,mask2unmask,eps=1e-3):
+    # possible_logits = []
+    # for poi in possible_indices:
+    #     if np.any(edge_index[idx]==mask2unmask[poi]):
+    #         possible_logits.append(edge_logits[idx][edge_index[idx]==mask2unmask[poi]])
+    #     else:
+    #         possible_logits.append(-1)
+    possible_logits = [edge_logits[idx][edge_index[idx]==mask2unmask[poi]] for poi in possible_indices]
+    possible_logits = np.array(possible_logits).flatten()
+    # possible_logits[possible_logits == -1] = np.max(possible_logits)
+    dist_logits = 1-np.exp(-(1.4/(dists+eps))**6)
+    return np.argsort(1-dist_logits*possible_logits)
+def flood_fill(atom14_positions, b_factors,edge_logits,edge_index,mask2unmask,n_c_distance_threshold=2.1):
     n_positions = atom14_positions[:, 0]
     c_positions = atom14_positions[:, 2]
     kdtree = cKDTree(c_positions)
@@ -276,9 +306,10 @@ def flood_fill(atom14_positions, b_factors, n_c_distance_threshold=2.1):
             )
         )
         possible_indices = possible_indices[possible_indices != idx]
-
         got_chain = False
         if len(possible_indices) > 0:
+            pos_dits = np.sqrt(np.sum(np.square(n_positions[idx][None] - c_positions[possible_indices]), axis=-1))
+            possible_indices = possible_indices[BayesCoreect(possible_indices, idx, pos_dits, edge_logits[...,1], edge_index, mask2unmask)]
             for possible_prev_residue in possible_indices:
                 if possible_prev_residue == idx:
                     continue
@@ -327,6 +358,10 @@ def flood_fill(atom14_positions, b_factors, n_c_distance_threshold=2.1):
         start_matches = kdtree.query_ball_point(
             c_chain_ends[chain_end_match], r=n_c_distance_threshold, return_sorted=True
         )
+        if len(start_matches)>0:
+            start_matches = np.array(start_matches)
+            pos_dits = np.sqrt(np.sum(np.square(c_chain_ends[chain_end_match][None] - n_chain_starts[start_matches]), axis=-1))
+            start_matches = start_matches[BayesCoreect(og_chain_starts[start_matches], og_chain_ends[chain_end_match], pos_dits, edge_logits[...,0], edge_index, mask2unmask)]
         for chain_start_match in start_matches:
             if (
                 chain_start_match not in spent_starts

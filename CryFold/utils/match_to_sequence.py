@@ -266,3 +266,52 @@ class MatchToSequence:
         )
 
         return new_chains
+    def prune_short_chains(
+            self,
+            chains,
+            match_original_seq_len=None,
+            chain_prune_length=11
+    ):
+        assertion_check(
+            len(chains) == len(self.new_sequences),
+            f"Chains: {len(chains)} not same size as sequences: {len(self.new_sequences)}",
+        )
+        new_sequences = []  # Sequence len
+        residue_idxs = []  # Sequence len
+        sequence_idxs = []  # Not sequence len
+        key_start_matches = []  # Not sequence len
+        key_end_matches = []  # Not sequence len
+        match_scores = []  # Not sequence len
+        hmm_output_match_sequences = []  # Sequence len
+        exists_in_sequence_mask = []  # Sequence len
+        new_chains = []
+
+        # More convenient
+        chains = [np.array(c) for c in chains]
+        for chain_id in range(len(self.new_sequences)):
+            CF_seq_len = np.sum(self.exists_in_sequence_mask[chain_id] > 0.5)
+            if CF_seq_len<chain_prune_length and CF_seq_len/(match_original_seq_len[chain_id])<0.2:
+                continue
+            new_sequences.append(self.new_sequences[chain_id])
+            residue_idxs.append(self.residue_idxs[chain_id])
+            exists_in_sequence_mask.append(self.exists_in_sequence_mask[chain_id])
+            new_chains.append(chains[chain_id])
+
+            sequence_idxs.append(self.sequence_idxs[chain_id])
+            key_start_matches.append(np.min(residue_idxs[-1]))
+            key_end_matches.append(np.max(residue_idxs[-1]))
+            match_scores.append(self.match_scores[chain_id])
+            hmm_output_match_sequences.append(self.hmm_output_match_sequences[chain_id])
+
+        self.set_vals(
+            new_sequences,
+            residue_idxs,
+            sequence_idxs,
+            key_start_matches,
+            key_end_matches,
+            match_scores,
+            hmm_output_match_sequences,
+            exists_in_sequence_mask,
+        )
+
+        return new_chains
