@@ -270,7 +270,7 @@ class MatchToSequence:
             self,
             chains,
             match_original_seq_len=None,
-            chain_prune_length=11
+            chain_prune_length=12
     ):
         assertion_check(
             len(chains) == len(self.new_sequences),
@@ -290,7 +290,7 @@ class MatchToSequence:
         chains = [np.array(c) for c in chains]
         for chain_id in range(len(self.new_sequences)):
             CF_seq_len = np.sum(self.exists_in_sequence_mask[chain_id] > 0.5)
-            if CF_seq_len<chain_prune_length and CF_seq_len/(match_original_seq_len[chain_id])<0.2:
+            if CF_seq_len<chain_prune_length and CF_seq_len/(match_original_seq_len[chain_id])<0.26:
                 continue
             new_sequences.append(self.new_sequences[chain_id])
             residue_idxs.append(self.residue_idxs[chain_id])

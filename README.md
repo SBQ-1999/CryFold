@@ -103,17 +103,17 @@ build -s rcsb_pdb_7XMV.fasta -v emd_33306.map -m emd_33306_msk_1.map -o use_mask
 <summary>Use only cryo-EM density map without inputting sequences</summary>
 <br>
 
-If you have a protein sequence database for the species that can cover all sequences of the density map, you can run the command as follows (Otherwise, do not specify the -f parameter, and it will only return the HMM profiles predicted by Cry-Net):
+If you have a protein sequence database for the species which covers all sequences of the density map, you can run the command as follows (Otherwise, do not specify the parameter -f, and it will only return the HMM profiles predicted by Cry-Net):
 ```
 build -v map.mrc -o output -f sequence_database.fasta
 ```
-Another way to use the sequence database is under the premise of input sequences (which can be any subset of the sequences covered by the density map):
+The other way to use the sequence database is under the premise of input sequences (which can be any subset of the sequences covered by the density map):
 ```
 build -s protein.fasta -v map.mrc -o output -f sequence_database.fasta
 ```
-Both of the above applications can return a new sequence file (output.fasta), which contains sequences found in the density map based on the sequence database.
+Both of the above applications can return a new file (output.fasta), which contains sequences found in the density map based on the sequence database.
 
-Under the premise of not knowing any sequences, the simplest application method is to obtain an initial sequence output.fasta by not inputting any sequences and only providing the sequence database. Then, use output.fasta as the input for CryFold and run it iteratively until no new sequences are searched.
+Based on the premise of not knowing any specific sequences, this method can quickly obtain initial matching sequences from a protein database. Then, use output.fasta as the input for CryFold and run it iteratively until no new sequences are searched.
 </details> 
 
 <details>
