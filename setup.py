@@ -8,6 +8,8 @@ import CryFold
 
 setup(
     name="CryFold",
+    author='Baoquan Su',
+    author_email='202217127mail.sdu.edu.cn',
     entry_points={
         "console_scripts": [
             "build = CryFold.build:main",

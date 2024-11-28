@@ -55,7 +55,7 @@ def get_inference_data(protein, grid_data, idx, crop_length=200):
     backbone_frames = protein.rigidgroups_gt_frames[:, 0]  # (num_res, 3, 4)
     ca_positions = get_affine_translation(backbone_frames)
     picked_indices = np.arange(len(ca_positions), dtype=int)
-    if len(ca_positions) > crop_length:
+    if len(ca_positions) >= crop_length:
         random_res_index = idx
         kd = cKDTree(ca_positions)
         _, picked_indices = kd.query(ca_positions[random_res_index], k=crop_length)
@@ -219,7 +219,7 @@ def infer(args):
             f"Grid volume file {args.map_path} is not a cryo_em density map file format."
         )
     num_res = len(protein.rigidgroups_gt_frames)
-
+    CryNet_crop_length = args.crop_length if num_res>args.crop_length else num_res
     collated_results = init_empty_collate_results(
         num_res,
         device="cpu",
@@ -232,7 +232,7 @@ def infer(args):
     pbar = tqdm.tqdm(total=total_steps, file=sys.stdout, position=0, leave=True)
     while residues_left > 0:
         idx = argmin_random(collated_results["counts"])
-        data = get_inference_data(protein, grid_data, idx, crop_length=args.crop_length)
+        data = get_inference_data(protein, grid_data, idx, crop_length=CryNet_crop_length)
 
         results = run_inference_on_data(
             module, data
@@ -243,7 +243,7 @@ def infer(args):
             data["indices"],
             protein,
             end_flag=True if args.aggressive_repeat else args.end_flag,
-            crop_length=args.crop_length,
+            crop_length=CryNet_crop_length,
             repeat_num=args.repeat_per_residue
         )
         residues_left = (

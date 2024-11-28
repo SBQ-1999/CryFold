@@ -134,7 +134,7 @@ def final_results_to_cif(
     existence_mask = (
         torch.from_numpy(final_results["existence_mask"]).sigmoid() > mask_threshold
     ).numpy()
-    existence_mask = remove_overlapping_ca(ca_positions=get_affine_translation(backbone_affine),bfactors=bfactors,existence_mask=existence_mask,radius_threshold=0.65 if end_flag else 0.3)
+    existence_mask = remove_overlapping_ca(ca_positions=get_affine_translation(backbone_affine),bfactors=bfactors,existence_mask=existence_mask,radius_threshold=1.5 if end_flag else 0.5)
     if aatype is None:
         aatype = np.argmax(final_results["aa_logits"], axis=-1)[existence_mask]
     backbone_affine = backbone_affine[existence_mask]

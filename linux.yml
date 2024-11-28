@@ -8,7 +8,6 @@ channels:
   - pytorch
   - nvidia
   - conda-forge
-  - defaults
 dependencies:
   - cudatoolkit=11.3.1
   - numpy=1.21.5
