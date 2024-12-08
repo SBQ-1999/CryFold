@@ -19,6 +19,12 @@ It also requires at least 13GB of GPU memory.
 <summary>Version History</summary>
 <br>
 
+**V1.3.2** 
+
+1.Accelerated the speed of hmmsearch and supported the output of a2m format alignment result files in the hmm directory for user reference.
+
+2.Added a new refine feature. Users can provide a protein structure file for CryFold refinement and identification. Please see **Usage** for details.
+
 **V1.3.1** 
 
 1.Fixed the bug that caused density maps with less than 300 amino acids to not run. 
@@ -143,6 +149,22 @@ If you want to infer 900 residues at once (the default is 300), you can set it u
 build -s protein.fasta -v map.mrc -o output_dir -n 900
 ```
 </details> 
+
+<details>
+<summary>Refine and identify the protein using the density map</summary>
+<br>
+
+This feature allows refining the protein using density maps, or identifying a consecutive segment of unknown amino acids based on the density map. This feature does not perform de novo modeling of the protein; rather, it constructs models based on the user-provided mmCIF file (or PDB file). The only requirement for the protein file provided by the user is that the positions of the C-alpha atoms should not differ significantly, and CryFold only extracts C-alpha atoms; other information will not be used for modeling.
+
+The command for refinement is
+```
+build -r backbone.cif -s protein.fasta -v map.mrc -o output_dir
+```
+The command for identification is
+```
+build -r backbone.cif -v map.mrc -o output_dir -f sequence_database.fasta
+```
+</details>
 
 ## FAQs
 

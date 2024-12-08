@@ -100,6 +100,13 @@ def add_args(parser):
         type=str,
     )
     additional_args.add_argument(
+        '--refine-backbone-path',
+        "-r",
+        "--r",
+        help="Protein backbone atom file for refinement and identification.",
+        type=str,
+    )
+    additional_args.add_argument(
         "--crop-length",
         "-n",
         "--n",
@@ -159,18 +166,22 @@ def main():
         _ = read_fasta(parsed_args.sequence_path)
 
 
+    if parsed_args.refine_backbone_path:
+        ca_cif_path = parsed_args.refine_backbone_path
+        config["CryNet_args"]["num_rounds"] = 1
+        config["CryNet_args"]["mask_threshold"] = 0
+    else:
+        # Run C-alpha inference ----------------------------------------------------------------------------------------
+        print("--------------------- CryFold Stage1 (Predict C-alpha atoms by U-Net) ---------------------")
 
-    # Run C-alpha inference ----------------------------------------------------------------------------------------
-    print("--------------------- CryFold Stage1 (Predict C-alpha atoms by U-Net) ---------------------")
+        UNet_args = Args(config["UNet_Args"])
+        UNet_args.log_dir = UNet_model_logdir
+        UNet_args.map_path = parsed_args.map_path
+        UNet_args.output_path = os.path.join(parsed_args.output_dir, "see_alpha_output")
+        UNet_args.device = parsed_args.device
+        UNet_args.mask_path = parsed_args.mask_path
 
-    UNet_args = Args(config["UNet_Args"])
-    UNet_args.log_dir = UNet_model_logdir
-    UNet_args.map_path = parsed_args.map_path
-    UNet_args.output_path = os.path.join(parsed_args.output_dir, "see_alpha_output")
-    UNet_args.device = parsed_args.device
-    UNet_args.mask_path = parsed_args.mask_path
-
-    ca_cif_path = UNet_infer(UNet_args)
+        ca_cif_path = UNet_infer(UNet_args)
 
 
     current_ca_cif_path = ca_cif_path
@@ -244,7 +255,10 @@ def main():
         os.replace(hmm_profiles_src, hmm_profiles_dst)
 
     if not parsed_args.keep_intermediate_results:
-        shutil.rmtree(UNet_args.output_path, ignore_errors=True)
+        if parsed_args.refine_backbone_path:
+            pass
+        else:
+            shutil.rmtree(UNet_args.output_path, ignore_errors=True)
         for i in range(total_CryNet_rounds):
             shutil.rmtree(
                 os.path.join(

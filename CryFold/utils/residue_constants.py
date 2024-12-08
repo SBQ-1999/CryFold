@@ -55,7 +55,7 @@ restype_3to1 = {
     "TRP": "W",
     "TYR": "Y",
     "VAL": "V",
-    "HIC": "Z",#非标准氨基酸
+    "HIC": "Z",# non-standard amino acid
 }
 
 restype_3_to_index = {
@@ -102,7 +102,7 @@ restype_1_to_index = {
     "W": 17,
     "Y": 18,
     "V": 19,
-    "Z": 20,#非标准氨基酸
+    "Z": 20,# non-standard amino acid
 }
 
 index_to_restype_1 = [
