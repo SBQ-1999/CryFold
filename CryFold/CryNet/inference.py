@@ -19,20 +19,23 @@ from CryFold.utils.fasta_utils import is_valid_fasta_ending
 from CryFold.utils.protein import Protein, load_sequence_from_fasta, get_protein_empty_except, load_protein_from_prot, \
     get_lm_embeddings_for_protein, get_protein_from_file_path
 from CryFold.utils.affine_utils import init_random_affine_from_translation, get_affine_translation, get_affine, get_affine_rot
-from CryFold.utils.pdb_untils import load_cas_from_structure
+from CryFold.utils.pdb_untils import load_cas_from_structure,load_affines_cas_from_structure
 import numpy as np
 from CryFold.CryNet.CryFolder import CryFolder
 
 def get_module_device(module: torch.nn.Module) -> torch.device:
     return next(module.parameters()).device
 
-def init_protein_from_see_alpha(see_alpha_file: str, fasta_file: str,end_flag:bool=False) -> Protein:
-    ca_locations = torch.from_numpy(load_cas_from_structure(see_alpha_file)).float()
-    rigidgroups_gt_frames = np.zeros((len(ca_locations), 1, 3, 4), dtype=np.float32)
-    rigidgroups_gt_frames[:, 0] = init_random_affine_from_translation(
-        ca_locations
-    ).numpy()
-    rigidgroups_gt_exists = np.ones((len(ca_locations), 1), dtype=np.float32)
+def init_protein_from_see_alpha(see_alpha_file: str, fasta_file: str,is_refine:bool=False) -> Protein:
+    if is_refine:
+        rigidgroups_gt_frames = load_affines_cas_from_structure(see_alpha_file)
+    else:
+        ca_locations = torch.from_numpy(load_cas_from_structure(see_alpha_file)).float()
+        rigidgroups_gt_frames = np.zeros((len(ca_locations), 1, 3, 4), dtype=np.float32)
+        rigidgroups_gt_frames[:, 0] = init_random_affine_from_translation(
+            ca_locations
+        ).numpy()
+    rigidgroups_gt_exists = np.ones((len(rigidgroups_gt_frames), 1), dtype=np.float32)
     unified_seq, unified_seq_len = load_sequence_from_fasta(fasta_file)
 
     return get_protein_empty_except(
@@ -212,7 +215,7 @@ def infer(args):
     if args.struct.endswith("cif") or args.struct.endswith("pdb"):
         if not is_valid_fasta_ending(args.fasta):
             raise RuntimeError(f"File {args.fasta} is not a fasta file format.")
-        protein = init_protein_from_see_alpha(args.struct, args.fasta,end_flag=args.end_flag)
+        protein = init_protein_from_see_alpha(args.struct, args.fasta,is_refine=args.is_refine)
         protein = get_lm_embeddings_for_protein(protein,device=device)
     if protein is None:
         raise RuntimeError(f"File {args.struct} is not a supported file format.")

@@ -170,6 +170,7 @@ def main():
         ca_cif_path = parsed_args.refine_backbone_path
         config["CryNet_args"]["num_rounds"] = 1
         config["CryNet_args"]["mask_threshold"] = 0
+        config["CryNet_args"]["is_refine"] = True
     else:
         # Run C-alpha inference ----------------------------------------------------------------------------------------
         print("--------------------- CryFold Stage1 (Predict C-alpha atoms by U-Net) ---------------------")
@@ -180,7 +181,7 @@ def main():
         UNet_args.output_path = os.path.join(parsed_args.output_dir, "see_alpha_output")
         UNet_args.device = parsed_args.device
         UNet_args.mask_path = parsed_args.mask_path
-
+        config["CryNet_args"]["is_refine"] = False
         ca_cif_path = UNet_infer(UNet_args)
 
 

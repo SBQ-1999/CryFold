@@ -4,7 +4,7 @@ import einops
 from Bio.PDB import MMCIFParser, PDBParser
 from Bio.PDB.Atom import DisorderedAtom
 from CryFold.utils.residue_constants import restype_3to1,rigid_group_atom_positions, restype_name_to_atom14_names,get_chi_atom_indices, chi_pi_periodic, atom_order,restype_1_to_index
-from CryFold.utils.affine_utils import affine_from_3_points, get_affine_rot, get_affine, affine_mul_vecs, invert_affine
+from CryFold.utils.affine_utils import affine_from_3_points, get_affine_rot, get_affine, affine_mul_vecs, invert_affine, init_random_affine_from_translation
 from CryFold.utils.torch_utlis import batched_gather
 from CryFold.utils.residue_constants import chi_angles_mask as chi_mask
 def load_cas_from_structure(stu_fn, all_structs=False, quiet=True):
@@ -46,7 +46,7 @@ def load_cas_from_structure(stu_fn, all_structs=False, quiet=True):
                     ca_coords.append(a.get_vector().get_array())
 
     return np.array(ca_coords)
-def load_affines_from_structure(stu_fn, all_structs=False, quiet=True):
+def load_affines_cas_from_structure(stu_fn, all_structs=False, quiet=True):
     if stu_fn.split(".")[-1][:3] == "pdb":
         parser = PDBParser(QUIET=quiet)
     elif stu_fn.split(".")[-1][:3] == "cif":
@@ -60,44 +60,32 @@ def load_affines_from_structure(stu_fn, all_structs=False, quiet=True):
 
     if not all_structs:
         structure = [structure[0]]
-    ca_coords = []
-    n_coords = []
-    c_coords = []
-    sequences = []
+    ncac_coords = []
+    only_ca_coords = []
     for model in structure:
         if not quiet:
             print("Model contains", len(model), "chain(s)")
         for model in structure:
             for chain in model:
-                sequence = ''
                 for residue in chain:
                     if residue.has_id('N') and residue.has_id('CA') and residue.has_id('C'):
-                        aa_name = restype_3to1.get(residue.get_resname(), 'Z')
-                        if aa_name == 'Z':
-                            continue
-                        else:
-                            sequence = sequence + aa_name
-                            n_atom = residue['N']
-                            ca_atom = residue['CA']
-                            c_atom = residue['C']
-                            n_coords.append(n_atom.get_coord())
-                            ca_coords.append(ca_atom.get_coord())
-                            c_coords.append(c_atom.get_coord())
-                if sequence != '':
-                    sequences.append(sequence)
-    n_coords = einops.rearrange(torch.tensor(n_coords), '(b h) d -> b h d', h=1,d=3)
-    ca_coords = einops.rearrange(torch.tensor(ca_coords), '(b h) d -> b h d', h=1, d=3)
-    c_coords = einops.rearrange(torch.tensor(c_coords), '(b h) d -> b h d', h=1, d=3)
-    ncac = torch.cat([n_coords,ca_coords,c_coords],dim=1)
-    ncacs = ncac.numpy()
-    affines = affine_from_3_points(
-            ncac[..., 2, :], ncac[..., 1, :], ncac[..., 0, :]
+                        ncac_coords.append([residue['N'].get_coord(),residue['CA'].get_coord(),residue['C'].get_coord()])
+                    elif residue.has_id('CA'):
+                        only_ca_coords.append(residue['CA'].get_coord())
+    rigidgroups_gt_frames = torch.zeros((len(ncac_coords)+len(only_ca_coords), 1, 3, 4), dtype=torch.float)
+    if len(ncac_coords)>0:
+        ncac = torch.from_numpy(np.array(ncac_coords)).float()
+        affines = affine_from_3_points(
+                ncac[..., 2, :], ncac[..., 1, :], ncac[..., 0, :]
+            )
+        affines[..., :, 0] = affines[..., :, 0] * (-1)
+        affines[..., :, 2] = affines[..., :, 2] * (-1)
+        rigidgroups_gt_frames[:len(ncac_coords),0] = affines
+    if len(only_ca_coords)>0:
+        rigidgroups_gt_frames[len(ncac_coords):, 0] = init_random_affine_from_translation(
+            torch.from_numpy(np.array(only_ca_coords)).float()
         )
-    affines[..., :, 0] = affines[..., :, 0] * (-1)
-    affines[..., :, 2] = affines[..., :, 2] * (-1)
-    affines = affines.numpy()
-    # affines = einops.rearrange(affines, '(b h) w d -> b h w d', b=1,w=3,d=4)
-    return affines,ncacs,sequences
+    return rigidgroups_gt_frames.numpy()
 def load_affines_from_structure(stu_fn, all_structs=False, quiet=True):
     if stu_fn.split(".")[-1][:3] == "pdb":
         parser = PDBParser(QUIET=quiet)

@@ -154,7 +154,7 @@ build -s protein.fasta -v map.mrc -o output_dir -n 900
 <summary>Refine and identify the protein using the density map</summary>
 <br>
 
-This feature allows refining the protein using density maps, or identifying a consecutive segment of unknown amino acids based on the density map. This feature does not perform de novo modeling of the protein; rather, it constructs models based on the user-provided mmCIF file (or PDB file). The only requirement for the protein file provided by the user is that the positions of the C-alpha atoms should not differ significantly, and CryFold only extracts C-alpha atoms; other information will not be used for modeling.
+This feature allows refining the protein using density maps, or identifying a consecutive segment of unknown amino acids based on the density map. This feature does not perform de novo modeling of the protein; rather, it constructs models based on the user-provided mmCIF file (or PDB file). The only requirement for the protein file provided by the user is that the positions of the C-alpha atoms should not differ significantly, and CryFold only extracts backbone atoms; other information will not be used for modeling.
 
 The command for refinement is
 ```
@@ -255,15 +255,17 @@ build -v map.mrc -o out -c .../config.json
 <summary><strong>5. How to improve if I get poor models?</strong></summary>
 <br>
 
-If the model contains some strange proteins, it may be due to noise in the density map. You can use the 'Extra use of mask map' mentioned in the Usage section to mask out regions unrelated to the target protein.
+**Case 1**: If the model contains some strange proteins, it may be due to noise in the density map. You can use the 'Extra use of mask map' mentioned in the Usage section to mask out regions unrelated to the target protein.
 
-If there is extra density in the density map indicating proteins, but the model does not provide prediction results, please check if there are additional high-confidence proteins (with bfactor values above 60) in "out_raw.cif". If so, this indicates that the input sequence is incomplete. Please select a larger sequence database and refer to the method described in the previous question (FAQs 3) to search for sequences as new input for CryFold.
+**Case 2**: If there is extra density in the density map indicating proteins, but the model does not provide prediction results, please check if there are additional high-confidence proteins (with bfactor values above 60) in "out_raw.cif". If so, this indicates that the input sequence is incomplete. Please select a larger sequence database and refer to the method described in the previous question (FAQs 3) to search for sequences as new input for CryFold.
 
-The lower the local resolution of an area, the more randomness there is in the predicted results, which may lead to poor model performance. CryFold can be run multiple times to select the best model. Another solution is to modify the "num_rounds" or "repeat_per_residue" parameters in the "CryNet_args" section of the "config.json" file (change it to 4). These two parameters can increase the modeling time of CryFold for proteins, thereby improving the modeling quality at low resolutions. The complete command is as follows:
+**Case 3**: The lower the local resolution of an area, the more randomness there is in the predicted results, which may lead to poor model performance. CryFold can be run multiple times to select the best model. Another solution is to modify the "num_rounds" or "repeat_per_residue" parameters in the "CryNet_args" section of the "config.json" file (change it to 4). These two parameters can increase the modeling time of CryFold for proteins, thereby improving the modeling quality at low resolutions. The complete command is as follows:
 ```
 conda activate CryFold
 build -v map.mrc -o out -c .../config.json
 ```
+
+**Case 4**: If none of the above scenarios work, consider using human-computer interaction methods for protein modeling. Please manually construct the backbone atoms for the poorly modeled parts based on the density map (at least include the C-alpha atoms, without needing to specify the exact identity of the amino acids). Then, utilize the refinement and identification functions of CryFold mentioned in the **Usage** section to assist in the modeling. Achieve the best model construction through manual intervention and the support of CryFold.
 </details>
 
 <details>
